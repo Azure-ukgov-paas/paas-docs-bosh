@@ -1,0 +1,214 @@
+---
+title: vSphere CPI
+---
+
+This topic describes cloud properties for different resources created by the vSphere CPI.
+
+## <a id='networks'></a> Networks
+
+Schema for `cloud_properties` section used by manual network subnet:
+
+* **name** [String, required]: Name of the vSphere network. Example: `VM Network`.
+
+Example of manual network:
+
+```yaml
+networks:
+- name: default
+  type: manual
+  subnets:
+  - range: 10.10.0.0/24
+    gateway: 10.10.0.1
+    cloud_properties:
+      name: VM Network
+```
+
+vSphere CPI does not support dynamic or vip networks.
+
+---
+## <a id='resource-pools'></a> Resource Pools
+
+Schema for `cloud_properties` section:
+
+* **cpu** [Integer, required]: Number of CPUs. Example: `1`.
+* **ram** [Integer, required]: RAM in megabytes. Example: `1024`.
+* **disk** [Integer, required]: Ephemeral disk size in megabytes. Example: `10240`.
+* **nested\_hardware\_virtualization** [Boolean, optional]: Exposes hardware assisted virtualization to the VM. Default: `false`.
+
+* **datacenters** [Array, optional]: Array of datacenters to use for VM placement. Must have only one and it must match datacenter configured in global CPI options.
+    * **name** [String, required]: Datacenter name.
+    * **clusters** [Array, required]: Array of clusters to use for VM placement.
+        * **\<cluster name\>** [String, required]: Cluster name.
+            * **drs_rulers** [Array, optional]: Array of DRS rules applied to [constrain VM placement](vm-anti-affinity.html#vsphere). Must have only one.
+                * **name** [String, required]: Name of a DRS rule that the Director will create.
+                * **type** [String, required]: Type of a DRS rule. Currently only `separate_vms` is supported.
+
+Example of a VM with 1 CPU, 1GB RAM, and 10GB ephemeral disk asked to be placed into a specific cluster:
+
+```yaml
+resource_pools:
+- name: default
+  network: default
+  stemcell:
+    name: bosh-vsphere-esxi-ubuntu-trusty-go_agent
+    version: latest
+  cloud_properties:
+    cpu: 2
+    ram: 1_024
+    disk: 10_240
+
+    datacenters:
+    - name: my-dc
+      clusters:
+      - my-vsphere-cluster: {}
+```
+
+And an example of a VM asked to be placed into a specific cluster in a specified vSphere resource pool:
+
+```yaml
+resource_pools:
+- name: default
+  network: default
+  stemcell:
+    name: bosh-vsphere-esxi-ubuntu-trusty-go_agent
+    version: latest
+  cloud_properties:
+    cpu: 2
+    ram: 1_024
+    disk: 10_240
+
+    datacenters:
+    - name: my-dc
+      clusters:
+      - my-vsphere-cluster: {resource_pool: my-vsphere-res-pool}
+```
+
+---
+## <a id='disk-pools'></a> Disk Pools
+
+Schema for `cloud_properties` section:
+
+* **type** [String, optional]: Type of the [disk](http://pubs.vmware.com/vi-sdk/visdk250/ReferenceGuide/vim.VirtualDiskManager.VirtualDiskType.html): `thick`, `thin`, `preallocated`, `eagerZeroedThick`. Defaults to `thick`. Available in v12.
+
+Example of 10GB disk:
+
+```yaml
+disk_pools:
+- name: default
+  disk_size: 10_240
+```
+
+Example of disk with type eagerZeroedThick:
+
+```yaml
+disk_pools:
+- name: default
+  disk_size: 10_240
+  cloud_properties:
+    type: eagerZeroedThick
+```
+
+---
+## <a id='global'></a> Global Configuration
+
+The CPI can only talk to a single vCenter installation and manage VMs within a single vSphere datacenter.
+
+Schema:
+
+* **host** [String, required]: IP address of the vCenter. Example: `172.16.68.3`.
+* **user** [String, required]: Username for the API access. Example: `root`.
+* **password** [String, required]: Password for the API access. Example: `vmware`
+
+* **datacenters** [Array, optional]: Array of datacenters to use for VM placement. Must have only one.
+    * **name** [String, required]: Datacenter name.
+
+    * **vm_folder** [String, required]: Path to a folder (relative to the datacenter) for storing created VMs. Folder will be automatically created if not found.
+    * **template_folder** [String, required]: Path to a folder (relative to the datacenter) for storing uploaded stemcells. Folder will be automatically created if not found.
+    * **disk_path** [String, required]: Path to a *disk* folder for storing persistent disks. Folder will be automatically created in the datastore if not found.
+
+    * **datastore_pattern** [String, required]: Pattern for selecting datastores for storing ephemeral disks and replicated stemcells.
+    * **persistent\_datastore\_pattern** [String, required]: Pattern for selecting datastores for storing persistent disks.
+
+    * **clusters** [Array, required]: Array of clusters to use for VM placement.
+        * **\<cluster name\>** [String, required]: Cluster name.
+            * **resource_pool** [String, optional]: Specific vSphere resource pool to use within the cluster.
+
+Example of a CPI configuration that will place VMs into `BOSH_CL` cluster within `BOSH_DC`:
+
+```yaml
+properties:
+  vsphere:
+    host: 172.16.68.3
+    user: root
+    password: vmware
+    datacenters:
+    - name: BOSH_DC
+      vm_folder: prod-vms
+      template_folder: prod-templates
+      disk_path: prod-disks
+      datastore_pattern: '\Aprod-ds\z'
+      persistent_datastore_pattern: '\Aprod-ds\z'
+      clusters: [BOSH_CL]
+```
+
+Or example that places VMs by default into `BOSH_RP` vSphere resource pool:
+
+```yaml
+properties:
+  vsphere:
+    host: 172.16.68.3
+    user: root
+    password: vmware
+    datacenters:
+    - name: BOSH_DC
+      vm_folder: prod-vms
+      template_folder: prod-templates
+      disk_path: prod-disks
+      datastore_pattern: '\Aprod-ds\z'
+      persistent_datastore_pattern: '\Aprod-ds\z'
+      clusters:
+      - BOSH_CL: {resource_pool: BOSH_RP}
+```
+
+---
+## <a id='notes'></a> Notes
+
+* Assigned VM names (e.g. `vm-8dg349-s7cn74-...`) should not be manually changed since the CPI uses them to find created VMs. You can use [`bosh vms --details`](sysadmin-commands.html#health) to find which VM is assigned which job. VMs are also tagged with their assigned job, index and deployment.
+
+* Storage DRS is not supported since it moves and renames persistent disks without maintaining same names.
+
+* `allow_mixed_datastores` configuration has been deprecated in favor of setting same datastore pattern for `datastore_pattern` and `persistent_datastore_pattern` keys.
+
+---
+## <a id='errors'></a> Errors
+
+```
+Field object_set is not optional
+```
+
+This error may occur when global CPI configuration references:
+
+- cluster (via `clusters` key) that cannot be found in the datacenter
+- stemcell that cannot be found in the templates folder
+
+```
+...should have the following properties: ["info.progress", "info.state", "info.result", "info.error"] (VSphereCloud::CloudSearcher::MissingPropertiesException), but they were missing these: #<Set: {"info.state"}>
+```
+
+Add `System.View` on vCenter server level so that persistent disks can be moved between the datastores.
+
+```
+Field counter_id is not optional
+...lib/cloud/vsphere/client.rb:270:in `fetch_perf_metric_names'
+```
+
+The CPI requires access to performance metrics from ESXi hosts. This error may be returned if one of the hosts in the cluster is not returning these metrics (e.g. `memory.usage.average`). Possible solution is to [restart management agents](http://www.running-system.com/no-cpu-and-memory-usage-data-from-host-available-in-vcenter/) on the hosts.
+
+```
+Failed to add disk scsi0:2.
+```
+
+This error typically occurs when persistent disk is being attached to a second VM while it is attached to another VM. That may happen when first VM was not properly deleted and BOSH is no longer aware of its existence.
+
+---
+Next: [Migrating from one datastore to another](vsphere-migrate-datastores.html)
